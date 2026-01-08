@@ -1,0 +1,119 @@
+diff --git a/project/build.sh b/project/build.sh
+index 11233f762..3b592e0ad 100755
+--- a/project/build.sh
++++ b/project/build.sh
+@@ -1497,45 +1497,79 @@ function __PACKAGE_USERDATA() {
+ 	fi
+ }
+ 
+-function __PACKAGE_ROOTFS() {
+-	local rootfs_tarball rootfs_out_dir
+-	rootfs_tarball="$RK_PROJECT_PATH_SYSDRV/rootfs_${RK_LIBC_TPYE}_${RK_CHIP}.tar"
+-
+-	if [ ! -f $rootfs_tarball ]; then
+-		msg_error "Build rootfs is not yet complete, packaging cannot proceed!"
+-		exit 0
+-	fi
+-
+-	if [ "$RK_BOOT_MEDIUM" == "emmc" ] && [ "$LF_TARGET_ROOTFS" == "ubuntu" ]; then
+-		if [ -f $WIFI_CONF ]; then
+-			cp $WIFI_CONF $RK_PROJECT_PACKAGE_ROOTFS_DIR/etc
+-		fi
+-	fi
+-
+-	if [ "$LF_TARGET_ROOTFS" == "buildroot" ] || [ "$LF_TARGET_ROOTFS" == "busybox" ]; then
+-		build_get_sdk_version
+-		cat >$RK_PROJECT_PACKAGE_ROOTFS_DIR/bin/sdkinfo <<EOF
++function __PACKAGE_ROOTFS()
++{
++    local rootfs_tarball _target_dir _install_dir
++
++    # --- Start Merged Instruction Logic ---
++    # Determine the rootfs tarball path (Default vs Custom)
++    if [ -z "$RK_CUSTOM_ROOTFS" ]; then
++        rootfs_tarball="$RK_PROJECT_PATH_SYSDRV/rootfs_${RK_LIBC_TPYE}_${RK_CHIP}.tar"
++        
++        # Verify default tarball exists
++        if [ ! -f "$rootfs_tarball" ]; then
++            msg_error "Not found rootfs tarball: $rootfs_tarball"
++            exit 1
++        fi
++        
++        # Extract default to Project Output
++        tar xf "$rootfs_tarball" -C "$RK_PROJECT_OUTPUT"
++    else
++        rootfs_tarball="$RK_CUSTOM_ROOTFS"
++        
++        # Verify custom tarball exists
++        if [ ! -f "$rootfs_tarball" ]; then
++            msg_error "Not found rootfs tarball: $rootfs_tarball"
++            exit 1
++        fi
++
++        # Ensure destination directory exists and extract
++        if [ ! -d "$RK_PROJECT_PACKAGE_ROOTFS_DIR" ]; then
++            mkdir -p "$RK_PROJECT_PACKAGE_ROOTFS_DIR"
++        fi
++		echo "USING CUSTOM ROOTFS: $rootfs_tarball extract to $RK_PROJECT_PACKAGE_ROOTFS_DIR"
++        tar xf "$rootfs_tarball" -C "$RK_PROJECT_PACKAGE_ROOTFS_DIR"
++    fi
++    # --- End Merged Instruction Logic ---
++
++    # --- Start Preserved Target Logic ---
++    
++    # Handle Ubuntu specific configurations (e.g., Wifi)
++    if [ "$RK_BOOT_MEDIUM" == "emmc" ] && [ "$LF_TARGET_ROOTFS" == "ubuntu" ]; then
++        if [ -f "$WIFI_CONF" ]; then
++            cp "$WIFI_CONF" "$RK_PROJECT_PACKAGE_ROOTFS_DIR/etc"
++        fi
++    fi
++
++    # Handle Buildroot/Busybox SDK info generation
++    if [ "$LF_TARGET_ROOTFS" == "buildroot" ] || [ "$LF_TARGET_ROOTFS" == "busybox" ]; then
++        build_get_sdk_version
++        cat >"$RK_PROJECT_PACKAGE_ROOTFS_DIR/bin/sdkinfo" <<EOF
+ #!/bin/sh
+ echo Build Time:  $(date "+%Y-%m-%d-%T")
+ echo SDK Version: ${GLOBAL_SDK_VERSION}
+ EOF
+-		chmod a+x $RK_PROJECT_PACKAGE_ROOTFS_DIR/bin/sdkinfo
+-		__COPY_FILES $RK_PROJECT_PATH_APP/root $RK_PROJECT_PACKAGE_ROOTFS_DIR
+-	fi
+-	__COPY_FILES $RK_PROJECT_PATH_MEDIA/root $RK_PROJECT_PACKAGE_ROOTFS_DIR
+-	__COPY_FILES $SDK_ROOT_DIR/external $RK_PROJECT_PACKAGE_ROOTFS_DIR
+-
+-	if [ -d "$RK_PROJECT_PACKAGE_ROOTFS_DIR/usr/share/iqfiles" ]; then
+-		(
+-			cd $RK_PROJECT_PACKAGE_ROOTFS_DIR/etc
+-			ln -sf ../usr/share/iqfiles ./
+-		)
+-	fi
+-
+-	if [ -f $RK_PROJECT_FILE_ROOTFS_SCRIPT ]; then
+-		chmod a+x $RK_PROJECT_FILE_ROOTFS_SCRIPT
+-		cp -f $RK_PROJECT_FILE_ROOTFS_SCRIPT $RK_PROJECT_PACKAGE_ROOTFS_DIR/etc/init.d
+-	fi
++        chmod a+x "$RK_PROJECT_PACKAGE_ROOTFS_DIR/bin/sdkinfo"
++        __COPY_FILES "$RK_PROJECT_PATH_APP/root" "$RK_PROJECT_PACKAGE_ROOTFS_DIR"
++    fi
++
++    # Copy media and external files
++    __COPY_FILES "$RK_PROJECT_PATH_MEDIA/root" "$RK_PROJECT_PACKAGE_ROOTFS_DIR"
++    __COPY_FILES "$SDK_ROOT_DIR/external" "$RK_PROJECT_PACKAGE_ROOTFS_DIR"
++
++    # Handle IQ Files symlink
++    if [ -d "$RK_PROJECT_PACKAGE_ROOTFS_DIR/usr/share/iqfiles" ]; then
++        (
++            cd "$RK_PROJECT_PACKAGE_ROOTFS_DIR/etc"
++            ln -sf ../usr/share/iqfiles ./
++        )
++    fi
++
++    # Copy Rootfs initialization script
++    if [ -f "$RK_PROJECT_FILE_ROOTFS_SCRIPT" ]; then
++        chmod a+x "$RK_PROJECT_FILE_ROOTFS_SCRIPT"
++        cp -f "$RK_PROJECT_FILE_ROOTFS_SCRIPT" "$RK_PROJECT_PACKAGE_ROOTFS_DIR/etc/init.d"
++    fi
+ }
+ 
+ function parse_partition_env() {

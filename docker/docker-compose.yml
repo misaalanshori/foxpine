@@ -1,0 +1,35 @@
+services:
+  builder:
+    build: .
+    container_name: foxbuntu_builder
+
+    # I think this was because I needed to use loop devices
+    privileged: true
+
+    # This keeps the container running indefinitely so you can attach to it
+    tty: true
+    stdin_open: true
+
+    volumes:
+      # The named volume for persistent work inside the container
+      - dev_work:/work
+      # The host bind mount (make sure ./external folder exists locally)
+      - ./external:/external
+
+      # 1. Persist User Keys (for Git, authorized_keys, client config)
+      - ssh_root:/root/.ssh
+      - ssh_builder:/home/builder/.ssh
+
+      # 2. Persist Server Host Keys (Optional)
+      # Prevents the "Remote Host Identification Changed" warning when you SSH *into* the container.
+      # We use a named volume here so it pre-populates with the default config files.
+      - ssh_host_keys:/etc/ssh
+
+    # Overriding the hostname makes the terminal prompt look nicer
+    hostname: devbox
+
+volumes:
+  dev_work:
+  ssh_root:
+  ssh_builder:
+  ssh_host_keys:
