@@ -1,11 +1,16 @@
 # Foxpine
+
+![Alpine Neofetch on the Luckfox Pico Mini](/assets/alpine.jpg?raw=true "Alpine Neofetch on the Luckfox Pico Mini")
+
 Creating the most ***complete*** (~~bloated~~) Alpine image for the Luckfox Pico (Mini B specifically). My goal is to make the most compatible Alpine image where I can plug or do things and it would just work, kinda like a Raspberry Pi experience. But worse cause this thing only got 64MB of RAM.
 
 You can try following these as instructions, but these are mostly for my own reference so I don't forget how to do it. Most of the hardwork is done by the Luckfox Pico SDK by Luckfox themselves. We just need to reconfigure things and provide our own rootfs.
 
-You may also be interested in checking my gist for my collection of the scattered messy notes I took: [Luckfox Pico Notes](https://gist.github.com/misaalanshori/7b03321733827e364d5fa53e1e842fa9).
-
 **The current progress is** I seem to have everything working, but I have not actually tested doing something productive with it.  
+
+![Basic functionality on the Luckfox Pico Mini](/assets/alpine2.jpg?raw=true "Basic functionality on the Luckfox Pico Mini")
+
+You may also be interested in checking my gist for my collection of the scattered messy notes I took: [Luckfox Pico Notes](https://gist.github.com/misaalanshori/7b03321733827e364d5fa53e1e842fa9).
 
 A lot of this is based/inspired by [Femtofox/Foxbuntu](https://github.com/femtofox/femtofox). For this you need the original SDK at [`https://github.com/LuckfoxTECH/luckfox-pico`](https://github.com/LuckfoxTECH/luckfox-pico).
 
