@@ -1,5 +1,5 @@
 #!/bin/bash
-sudo APK_OPTS="--arch armhf --allow-untrusted --no-progress"   ./alpine-make-rootfs   --keys-dir ./keys   --branch v3.15   --timezone Asia/Jakarta   --packages "alpine-baselayout busybox openrc apk-tools shadow \
+sudo APK_OPTS="--arch armhf --allow-untrusted --no-progress -X http://dl-cdn.alpinelinux.org/alpine/v3.15/community"   ./alpine-make-rootfs   --branch v3.15   --timezone Asia/Jakarta   --packages "alpine-baselayout busybox openrc apk-tools shadow \
               bash bash-completion nano htop bpytop file \
               grep sed gawk \
               tar gzip bzip2 xz zstd \
@@ -15,6 +15,8 @@ sudo APK_OPTS="--arch armhf --allow-untrusted --no-progress"   ./alpine-make-roo
               lm-sensors i2c-tools libgpiod rng-tools \
               tmux neofetch chrony \
               python3 git \
+              busybox-initscripts \
+              ifupdown-ng \
               linux-firmware-none \
               linux-firmware-brcm \
               linux-firmware-cypress \
@@ -26,7 +28,7 @@ sudo APK_OPTS="--arch armhf --allow-untrusted --no-progress"   ./alpine-make-roo
               linux-firmware-mrvl \
               linux-firmware-intel \
               linux-firmware-other \
-              wireless-regdb"  ./alpine-armhf-ultimate-v3.15.tar.gz --script-chroot - <<'SHELL'  # ==========================================
+              wireless-regdb"  ./alpine-armhf-ultimate.tar.gz --script-chroot - <<'SHELL'  # ==========================================
   # CONFIGURATION
   # ==========================================
   TARGET_DISK="/dev/mmcblk1"
@@ -36,7 +38,76 @@ sudo APK_OPTS="--arch armhf --allow-untrusted --no-progress"   ./alpine-make-roo
   # Export PATH for tools
   export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
-  # --- 1. Filesystem Setup ---
+
+  # --- 1. mdev Configuration ---
+  # Configure mdev to auto-load drivers
+  cat > /etc/mdev.conf <<EOF
+\$MODALIAS=.* root:root 660 @modprobe -b "\$MODALIAS"
+input/.* root:input 660
+snd/.* root:audio 660
+tty[0-9]* root:tty 660
+sd[a-z].* root:disk 660
+mmcblk[0-9].* root:disk 660
+tun[0-9]* root:netdev 660 =net/tun
+tap[0-9]* root:netdev 660 =net/tap
+EOF
+
+# --- 1.1 Custom Net Watchdog (Conflict-Free Version) ---
+  # This script monitors the cable. When plugged in, it forces the interface
+  # DOWN first (to allow MAC change), then brings it UP (to start DHCP).
+  cat > /usr/local/bin/net-watchdog <<EOF
+#!/bin/sh
+IFACE="eth0"
+
+while true; do
+  # 1. WAKE UP: Force L1/L2 up so the driver can read the PHY status.
+  ip link set \$IFACE up >/dev/null 2>&1
+  
+  # 2. READ STATUS
+  # Short sleep to let the PHY electronics wake up
+  usleep 200000
+  CARRIER=\$(cat /sys/class/net/\$IFACE/carrier 2>/dev/null || echo 0)
+  HAS_IP=\$(ip -4 addr show \$IFACE | grep -q "inet" && echo 1 || echo 0)
+
+  # 3. LOGIC
+  if [ "\$CARRIER" = "1" ] && [ "\$HAS_IP" = "0" ]; then
+     echo "Net Watchdog: Link Detected. Resetting interface..."
+     
+     # CRITICAL: Force DOWN. This ensures 'ifup' can apply the 
+     # 'pre-up' MAC address change safely.
+     ip link set \$IFACE down
+     
+     echo "Net Watchdog: Starting DHCP..."
+     ifup \$IFACE
+     
+  elif [ "\$CARRIER" = "0" ] && [ "\$HAS_IP" = "1" ]; then
+     echo "Net Watchdog: Link Lost. Stopping DHCP..."
+     ifdown \$IFACE
+  fi
+  
+  sleep 3
+done
+EOF
+  chmod +x /usr/local/bin/net-watchdog
+
+  # Create the OpenRC Service for the Watchdog
+  cat > /etc/init.d/net-watchdog <<EOF
+#!/sbin/openrc-run
+command="/usr/local/bin/net-watchdog"
+command_background=true
+pidfile="/run/net-watchdog.pid"
+description="Simple Network Hotplug Watcher"
+
+depend() {
+    need localmount
+    after networking
+}
+EOF
+  chmod +x /etc/init.d/net-watchdog
+
+  
+
+  # --- 2. Filesystem Setup ---
   mkdir -p /dev/pts /proc /sys
   cat > /etc/fstab <<EOF
 devpts      /dev/pts     devpts    gid=5,mode=620   0 0
@@ -46,18 +117,62 @@ tmpfs       /tmp         tmpfs     defaults         0 0
 # $ROOT_PARTITION  /            ext4      noatime      0 1
 EOF
 
-  # --- 2. Service Setup ---
+  # --- 3. Service Setup ---
   rc-update add devfs sysinit
   rc-update add procfs sysinit
   rc-update add sysfs sysinit
+  rc-update add mdev sysinit
+  rc-update add hwdrivers sysinit
   rc-update add networking boot
   rc-update add wpa_supplicant boot
+  rc-update add rngd boot
+  rc-update add swap boot
   rc-update add sshd default
   rc-update add chronyd default
-  rc-update add rngd boot
+  rc-update add net-watchdog default
   rc-update add bluetooth default
 
-# --- 3. FIRST BOOT PROVISIONING SCRIPT ---
+  # --- 4. PERSISTENT MAC SERVICE (EARLY BOOT) ---
+cat > /etc/init.d/mac-restore <<EOF
+#!/sbin/openrc-run
+description="Generate stable MAC address from CPU serial"
+
+depend() {
+    need localmount
+    before networking
+}
+
+start() {
+    ebegin "Provisioning Persistent MAC"
+    
+    # 1. Generate MAC (a2:xx:xx...)
+    STABLE_MAC=\$(awk '/Serial/ {print \$3}' /proc/cpuinfo | tail -c 11 | sed 's/^\(.*\)/a2\1/' | sed 's/\(..\)/\1:/g;s/:$//')
+    
+    # 2. Inject PRE-UP rule
+    # We use 'pre-up' which works perfectly with the full 'ifupdown' package.
+    if [ -n "\$STABLE_MAC" ] && grep -q "iface eth0 inet dhcp" /etc/network/interfaces; then
+         # Only inject if not already present
+         if ! grep -q "pre-up ip link set eth0 address" /etc/network/interfaces; then
+             echo "    pre-up ip link set eth0 address \$STABLE_MAC" >> /etc/network/interfaces
+             einfo "MAC Fixed: \$STABLE_MAC"
+         fi
+         
+         # Optional: Hostname
+         MAC_SUFFIX=\$(echo "\$STABLE_MAC" | awk -F: '{print \$5\$6}')
+         echo "luckfox-\$MAC_SUFFIX" > /etc/hostname
+         hostname -F /etc/hostname
+    fi
+    
+    # 3. Self Destruct
+    rc-update del mac-restore boot
+    rm -f /etc/init.d/mac-restore
+    eend 0
+}
+EOF
+  chmod +x /etc/init.d/mac-restore
+  rc-update add mac-restore boot
+
+  # --- 5. FIRST BOOT PROVISIONING SCRIPT ---
   # We use EOF (unquoted) so $ROOT_PARTITION expands NOW (during build),
   # but we escape \$KERNEL_VERSION so it expands LATER (during boot).
   cat > /etc/init.d/firstboot-provision <<EOF
@@ -103,6 +218,7 @@ start() {
             done
             # Cleanup
             rm -rf /oem
+
             eend \$?
         else
             ewarn "Provisioning: No OEM content found"
@@ -124,6 +240,12 @@ start() {
         rc-update del firstboot-provision default
         rm -f /etc/init.d/firstboot-provision
 
+        # Rescan hardware now that drivers are actually present
+        mdev -s
+
+        ebegin "Rebooting to apply driver changes..."
+        reboot
+
     # --- STAGE 1: First Boot Partition Expand ---
     else
         ebegin "Provisioning: Expanding Partition Table"
@@ -138,22 +260,22 @@ EOF
   chmod +x /etc/init.d/firstboot-provision
   rc-update add firstboot-provision default
 
-  # --- 4. SSH Configuration ---
+  # --- 6. SSH Configuration ---
   ssh-keygen -A
   sed -i 's/^#*PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config
   sed -i 's/^#*PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config
   sed -i 's|^#*Subsystem.*sftp.*|Subsystem sftp /usr/lib/ssh/sftp-server|' /etc/ssh/sshd_config
 
-  # --- 5. Console ---
+  # --- 7. Console ---
   sed -i '/^tty[1-6]::/d' /etc/inittab
   echo "ttyFIQ0::respawn:/sbin/agetty --autologin root ttyFIQ0 vt100" >> /etc/inittab
   echo ttyFIQ0 >> /etc/securetty
 
-  # --- 6. Network ---
-  echo "auto eth0" >> /etc/network/interfaces
+  # --- 8. Network ---
+  echo "allow-hotplug eth0" >> /etc/network/interfaces
   echo "iface eth0 inet dhcp" >> /etc/network/interfaces
 
-  # --- 7. User Configuration ---
+  # --- 9. User Configuration ---
   awk -F: 'FNR==NR {seen[$1]=1; next} !($1 in seen) {print $1":!:19700:0:99999:7:::"}' /etc/shadow /etc/passwd >> /etc/shadow
   echo "root:linux" | chpasswd
   adduser -D -s /bin/bash alpine

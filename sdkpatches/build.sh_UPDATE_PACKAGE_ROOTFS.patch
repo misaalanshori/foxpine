@@ -1,8 +1,8 @@
 diff --git a/project/build.sh b/project/build.sh
-index 11233f762..3b592e0ad 100755
+index 3f87c73bc..e56942ddd 100755
 --- a/project/build.sh
 +++ b/project/build.sh
-@@ -1497,45 +1497,79 @@ function __PACKAGE_USERDATA() {
+@@ -1498,39 +1498,79 @@ function __PACKAGE_USERDATA() {
  	fi
  }
  
@@ -13,12 +13,6 @@ index 11233f762..3b592e0ad 100755
 -	if [ ! -f $rootfs_tarball ]; then
 -		msg_error "Build rootfs is not yet complete, packaging cannot proceed!"
 -		exit 0
--	fi
--
--	if [ "$RK_BOOT_MEDIUM" == "emmc" ] && [ "$LF_TARGET_ROOTFS" == "ubuntu" ]; then
--		if [ -f $WIFI_CONF ]; then
--			cp $WIFI_CONF $RK_PROJECT_PACKAGE_ROOTFS_DIR/etc
--		fi
 -	fi
 -
 -	if [ "$LF_TARGET_ROOTFS" == "buildroot" ] || [ "$LF_TARGET_ROOTFS" == "busybox" ]; then
@@ -81,26 +75,24 @@ index 11233f762..3b592e0ad 100755
 -	fi
 -	__COPY_FILES $RK_PROJECT_PATH_MEDIA/root $RK_PROJECT_PACKAGE_ROOTFS_DIR
 -	__COPY_FILES $SDK_ROOT_DIR/external $RK_PROJECT_PACKAGE_ROOTFS_DIR
--
++        chmod a+x "$RK_PROJECT_PACKAGE_ROOTFS_DIR/bin/sdkinfo"
++        __COPY_FILES "$RK_PROJECT_PATH_APP/root" "$RK_PROJECT_PACKAGE_ROOTFS_DIR"
++    fi
+ 
 -	if [ -d "$RK_PROJECT_PACKAGE_ROOTFS_DIR/usr/share/iqfiles" ]; then
 -		(
 -			cd $RK_PROJECT_PACKAGE_ROOTFS_DIR/etc
 -			ln -sf ../usr/share/iqfiles ./
 -		)
 -	fi
--
++    # Copy media and external files
++    __COPY_FILES "$RK_PROJECT_PATH_MEDIA/root" "$RK_PROJECT_PACKAGE_ROOTFS_DIR"
++    __COPY_FILES "$SDK_ROOT_DIR/external" "$RK_PROJECT_PACKAGE_ROOTFS_DIR"
+ 
 -	if [ -f $RK_PROJECT_FILE_ROOTFS_SCRIPT ]; then
 -		chmod a+x $RK_PROJECT_FILE_ROOTFS_SCRIPT
 -		cp -f $RK_PROJECT_FILE_ROOTFS_SCRIPT $RK_PROJECT_PACKAGE_ROOTFS_DIR/etc/init.d
 -	fi
-+        chmod a+x "$RK_PROJECT_PACKAGE_ROOTFS_DIR/bin/sdkinfo"
-+        __COPY_FILES "$RK_PROJECT_PATH_APP/root" "$RK_PROJECT_PACKAGE_ROOTFS_DIR"
-+    fi
-+
-+    # Copy media and external files
-+    __COPY_FILES "$RK_PROJECT_PATH_MEDIA/root" "$RK_PROJECT_PACKAGE_ROOTFS_DIR"
-+    __COPY_FILES "$SDK_ROOT_DIR/external" "$RK_PROJECT_PACKAGE_ROOTFS_DIR"
-+
 +    # Handle IQ Files symlink
 +    if [ -d "$RK_PROJECT_PACKAGE_ROOTFS_DIR/usr/share/iqfiles" ]; then
 +        (
@@ -117,3 +109,16 @@ index 11233f762..3b592e0ad 100755
  }
  
  function parse_partition_env() {
+@@ -2521,6 +2561,12 @@ function build_firmware() {
+ 		mkdir -p $RK_PROJECT_PACKAGE_ROOTFS_DIR/oem
+ 		__COPY_FILES $RK_PROJECT_PACKAGE_OEM_DIR $RK_PROJECT_PACKAGE_ROOTFS_DIR/oem
+ 		rm -rf $RK_PROJECT_PACKAGE_OEM_DIR
++
++		if [[ $RK_PARTITION_CMD_IN_ENV =~ "oem" ]]; then
++			mkdir -p $RK_PROJECT_OUTPUT/oem_empty
++			build_mkimg $GLOBAL_OEM_NAME $RK_PROJECT_OUTPUT/oem_empty
++			rm -rf $RK_PROJECT_OUTPUT/oem_empty
++		fi
+ 	fi
+ 
+ 	__RUN_POST_BUILD_SCRIPT

@@ -1,15 +1,13 @@
 # Foxpine
-Creating the most ***complete*** (~~bloated~~) Alpine image for the Luckfox Pico (Mini B specifically).
+Creating the most ***complete*** (~~bloated~~) Alpine image for the Luckfox Pico (Mini B specifically). My goal is to make the most compatible Alpine image where I can plug or do things and it would just work, kinda like a Raspberry Pi experience. But worse cause this thing only got 64MB of RAM.
 
 You can try following these as instructions, but these are mostly for my own reference so I don't forget how to do it. Most of the hardwork is done by the Luckfox Pico SDK by Luckfox themselves. We just need to reconfigure things and provide our own rootfs.
 
-At the current state, this may or may not work. Just try it out I guess, I think it'll work but may have issues during runtime. My goal is to make the most compatible Alpine image where I can plug or do things and it would just work, kinda like a Raspberry Pi experience. But worse cause this thing only got 64MB of RAM.
-
 You may also be interested in checking my gist for my collection of the scattered messy notes I took: [Luckfox Pico Notes](https://gist.github.com/misaalanshori/7b03321733827e364d5fa53e1e842fa9).
 
-**The current state is** that I'm trying to get the kernel modules to be copied with its original structure so it can be processed by `depmod -a` properly. Also I'm testing if moving to Alpine v3.15 would give me uncompressed firmware files, because the kernel does not support zstd compressed firmware files while the latest versions of Alpine gives you .zst compressed firmares.
+**The current progress is** I seem to have everything working, but I have not actually tested doing something productive with it.  
 
-A lot of this is based/inspired by [Femtofox/Foxbuntu](https://github.com/femtofox/femtofox), so you might also want to use the Luckfox SDK forked at [`https://github.com/Ruledo/luckfox-pico.git`](https://github.com/Ruledo/luckfox-pico.git) like they do, but I'm pretty sure the original SDK at [`https://github.com/LuckfoxTECH/luckfox-pico`](https://github.com/LuckfoxTECH/luckfox-pico) should work just fine since we don't use Ubuntu.
+A lot of this is based/inspired by [Femtofox/Foxbuntu](https://github.com/femtofox/femtofox). For this you need the original SDK at [`https://github.com/LuckfoxTECH/luckfox-pico`](https://github.com/LuckfoxTECH/luckfox-pico).
 
 ## Preparing an Alpine rootfs
 Let's just start with making a rootfs first using [alpine-make-rootfs](https://github.com/alpinelinux/alpine-make-rootfs). Make it however you want, you can use the one I made at `foxpine/scripts/buildrootfs.sh` or just use it as a reference. It has basically all the packages I would ever need, but also a chroot script with inside it contains a firstboot script that will expand the rootfs to fill the partition, merge the OEM content (kernel modules and extra binaries), and create a swapfile. 
@@ -21,8 +19,11 @@ Let's just start with making a rootfs first using [alpine-make-rootfs](https://g
 After cloning the SDK, we need to sync our Foxpine changes to the SDK including allowing a custom rootfs to be used. 
 First just sync the changes using rsync:
 ```sh
+mkdir -p luckfox-pico/output/image
 rsync -aHAXv --progress --keep-dirlinks --itemize-changes \
-    foxpine/foxpine/sysdrv luckfox-pico/sysdrv/
+    foxpine/foxpine/luckfox-pico/ luckfox-pico/
+rsync -aHAXv --progress --keep-dirlinks --itemize-changes \
+    foxpine/foxpine/sysdrv/ luckfox-pico/sysdrv/
 rsync -aHAXv --progress --keep-dirlinks --itemize-changes \
     foxpine/foxpine/project/ luckfox-pico/project/
 rsync -aHAXv --progress --keep-dirlinks --itemize-changes \
@@ -44,6 +45,7 @@ cd luckfox-pico
 # Configure and build Kernel
 ./build.sh kernelconfig
 # Keep default or change as needed, then we build kernel and drivers:
+./build.sh kernel
 ./build.sh driver
 ```
 
@@ -52,19 +54,23 @@ At this point we **skip building the rootfs**, since we have already built our o
 Then we can continue by building the firmware:
 ```sh
 # Build the firmware images as root
+# sudo rm -rf output/out/rootfs_uclibc_rv1106 # Clear out the old rootfs if rebuilding
 sudo ./build.sh firmware
 
 # Then we can build a complete image
-cd output/image
+sudo ./build-image.sh
 
+# Do it manually if you want:
+# Then we can build a complete image
+# cd output/image
 # Fix rootfs partition size in env config
-sudo sed -i 's/6G(rootfs)/100G(rootfs)/' .env.txt
+# sudo sed -i 's/6G(rootfs)/100G(rootfs)/' .env.txt
 
 # Generate env image
-sudo ../../sysdrv/tools/pc/uboot_tools/mkenvimage -s 0x8000 -p 0x0 -o env.img .env.txt
+# sudo ../../sysdrv/tools/pc/uboot_tools/mkenvimage -s 0x8000 -p 0x0 -o env.img .env.txt
 
 # Pack the final image
-sudo ./blkenvflash ../../alpine.img
+# sudo ./blkenvflash ../../alpine.img
 ```
 
 Now you have an `alpine.img` you can flash with whatever you want, I've been using Balena Etcher so far (Rufus didn't want to work with the raw images for some reason, Etcher also complained but still worked)
